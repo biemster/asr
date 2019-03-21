@@ -1,0 +1,600 @@
+stream {
+  name: "input"
+  classname: "AudioDecoderStream"
+}
+stream {
+  name: "waveform_frame"
+  classname: "Framer"
+  params {
+    [greco.FramerParams.id] {
+      frame_size_ms: 25
+      frame_step_ms: 10
+      use_endpointer: true
+    }
+  }
+}
+stream {
+  name: "windowed_frame"
+  classname: "Window"
+  params {
+    [greco.WindowParams.id] {
+      window_type: HANNING
+      window_size_ms: 25
+    }
+  }
+}
+stream {
+  name: "fft_energies"
+  classname: "Fft"
+  params: ""
+  params_ref: "en_us.fft_params"
+}
+stream {
+  name: "cdf_fft_noise"
+  classname: "SpectralNoise"
+  params {
+    [greco.SpectralNoiseParams.id] {
+    }
+  }
+  params_ref: "en_us.fft_params"
+}
+stream {
+  name: "filterbank_energies"
+  classname: "FilterBank"
+  params {
+    [greco.FilterBankParams.id] {
+      channel_count: 80
+      upper_band_limit: 7500
+      lower_band_limit: 125
+      allow_extension_beyond_nyquist_freq: true
+    }
+  }
+  params_ref: "en_us.fft_params"
+}
+stream {
+  name: "filterbank_energies_stacked"
+  classname: "FrameStacker"
+  params {
+    [greco.FrameStackerParams.id] {
+      input_size: 80
+      left_context: 2
+      right_context: 0
+      sample_every_n: 1
+    }
+  }
+}
+stream {
+  name: "spectral_subtraction"
+  classname: "SpectralSubtractor"
+  params {
+    [greco.SpectralSubtractorParams.id] {
+    }
+  }
+  params_ref: "en_us.fft_params"
+}
+stream {
+  name: "filterbank_energies_ep"
+  classname: "FilterBank"
+  params {
+    [greco.FilterBankParams.id] {
+      channel_count: 40
+      summation_domain: SUM_MAGNITUDE
+      output_transform: OUTPUT_LOG
+    }
+  }
+  params_ref: "en_us.fft_params"
+}
+stream {
+  name: "vad_posterior"
+  classname: "LstmComputeStream"
+  params {
+     [greco.LstmComputeStreamParams.id] {
+      output_negative_log_probs: false
+      neural_network_config_ref: "en_us.vad.acoustic_model"
+      input_mean_stddev_ref: "en_us.vad.acoustic_mean_stddev"
+      17: 1
+      18: 1200
+      21: 0x3dcccccd
+    }
+  }
+}
+stream {
+  name: "audio_level_events"
+  classname: "AudioLevelEventStream"
+}
+stream {
+  name: "endpointer_events_to_decoder"
+  classname: "EndpointerEventStream"
+  params {
+    [greco.EndpointerEventParams.id] {
+      pass_through_frames: true
+    }
+  }
+}
+stream {
+  name: "endpointer_events"
+  classname: "EndpointerEventFilterStream"
+}
+stream {
+  name: "vad_decision_for_segmenter"
+  classname: "EndpointerStream"
+  params {
+    [greco.EndpointerParams.id] {
+      ep_decision_threshold: 0.1
+      never_transition_to_silence: false
+    }
+  }
+}
+stream {
+  name: "segmenter"
+  classname: "SegmenterStream"
+  params {
+    [greco.SegmenterParams.id] {
+      3: 400
+      4: 30000
+      5: 60000
+      6: 0
+    }
+  }
+}
+stream {
+  name: "subsampled_filter_bank"
+  classname: "SubsampleStream"
+  params {
+    [greco.SubsampleParams.id] {
+      frame_stride: 3
+    }
+  }
+}
+stream {
+  name: "rnnt_encoder0"
+  classname: "RnntEncoderStream"
+  params {
+    181802007 {
+      1: "encoder0_network"
+      2: "en_us.input_mean_stddev"
+      3: 3
+      6: 12000
+      7: 120
+    }
+  }
+}
+stream {
+  name: "rnnt_encoder_stacked"
+  classname: "FrameStacker"
+  params {
+    [greco.FrameStackerParams.id] {
+      input_size: 640
+      left_context: 1
+      right_context: 0
+      sample_every_n: 1
+      7: 1
+    }
+  }
+}
+stream {
+  name: "rnnt_encoder_subsampled"
+  classname: "SubsampleStream"
+  params {
+    [greco.SubsampleParams.id] {
+      frame_stride: 2
+    }
+  }
+}
+stream {
+  name: "rnnt_encoder1"
+  classname: "RnntEncoderStream"
+  params {
+    181802007 {
+      1: "encoder1_network"
+      6: 12000
+    }
+  }
+}
+stream {
+  name: "decoder"
+  classname: "DecoderEndpointerStream"
+  params {
+    [greco.DecoderParams.id] {
+      symbol_table_ref: "symbol_table"
+      output_word_conf_features: false
+      score_cache_ref: "encoder_score_cache"
+      num_batch_frames: 1
+      decoder_type: FST_SEARCH
+      output_word_lattice: true
+      partial_lattice_interval_ms: 100
+      compute_lattice_posterior: false
+      decoder_event_interval_ms: 100
+      34: 0
+      [greco.FstDecoderParams.id] {
+        decoder_fst_ref: "sigma_fst"
+        8: 5
+        search_params_ref: "en_us.decoder.search_parameters"
+        20: 3
+        24: 1
+        26: 12000
+      }
+      194955910 {
+        2: 1
+        4: 0x3fc66666
+        194955911 {
+          1: "decoder_runner"
+          2: "joint_runner"
+        }
+      }
+    }
+    [greco.DecoderEndpointerParams.id] {
+      min_silence_ms: 8000
+      enable_decoder_endpointing: false
+      enable_acoustic_endpointing: false
+      min_vad_silence_ms: 0
+    }
+    [greco.DecoderEndpointerStreamParams.id] {
+      mic_closer_stream_name: "endpointer_events_to_decoder"
+    }
+  }
+}
+stream {
+  name: "end_of_utterance_events"
+  classname: "EndpointerEventFilterStream"
+}
+stream {
+  name: "incremental_norm"
+  classname: "IncrementalNorm"
+  params {
+    [greco.IncrementalNormParams.id] {
+      normalizer_ref: "word_glue_normalizer"
+      normalizer_ref: "en_us.embedded_fix_ampm"
+      normalizer_ref: "en_us.embedded_replace_annotated_punct_words_dash"
+      normalizer_ref: "en_us.embedded_class_denorm"
+      normalizer_ref: "en_us.embedded_normalizer"
+      offensive_word_normalizer_ref: "en_us.offensive_word_normalizer"
+      symbol_table_ref: "symbol_table"
+      alternates_config {
+        generator_config {
+          name: "TimedNbestAlternatesGenerator"
+          max_alternates: 5
+          max_nbest: 5
+        }
+        pretextnorm_alternates: false
+      }
+      13: "<space>"
+    }
+  }
+}
+stream {
+  name: "recognition_events_filter"
+  classname: "RecognitionEventFilterStream"
+}
+stream {
+  name: "recognition_events"
+  classname: "RecognitionEventStream"
+}
+connect {
+  from: "input"
+  to: "waveform_frame"
+}
+connect {
+  from: "waveform_frame"
+  to: "windowed_frame"
+}
+connect {
+  from: "windowed_frame"
+  to: "fft_energies"
+}
+connect {
+  from: "fft_energies"
+  to: "cdf_fft_noise"
+}
+connect {
+  from: "fft_energies"
+  to: "filterbank_energies"
+}
+connect {
+  from: "filterbank_energies"
+  to: "filterbank_energies_stacked"
+}
+connect {
+  from: "cdf_fft_noise"
+  to: "spectral_subtraction"
+}
+connect {
+  from: "spectral_subtraction"
+  to: "filterbank_energies_ep"
+}
+connect {
+  from: "filterbank_energies_ep"
+  to: "vad_posterior"
+}
+connect {
+  from: "vad_decision_for_segmenter"
+  to: "endpointer_events_to_decoder"
+}
+connect {
+  from: "endpointer_events_to_decoder"
+  to: "endpointer_events"
+}
+connect {
+  from: "vad_posterior"
+  to: "vad_decision_for_segmenter"
+}
+connect {
+  from: "vad_posterior"
+  to: "audio_level_events"
+}
+connect {
+  from: "filterbank_energies_stacked"
+  to: "segmenter"
+}
+connect {
+  from: "vad_decision_for_segmenter"
+  to: "segmenter"
+}
+connect {
+  from: "segmenter"
+  to: "subsampled_filter_bank"
+}
+connect {
+  from: "subsampled_filter_bank"
+  to: "rnnt_encoder0"
+}
+connect {
+  from: "rnnt_encoder0"
+  to: "rnnt_encoder_stacked"
+}
+connect {
+  from: "rnnt_encoder_stacked"
+  to: "rnnt_encoder_subsampled"
+}
+connect {
+  from: "rnnt_encoder_subsampled"
+  to: "rnnt_encoder1"
+}
+connect {
+  from: "rnnt_encoder1"
+  to: "decoder"
+}
+connect {
+  from: "endpointer_events_to_decoder"
+  to: "decoder"
+}
+connect {
+  from: "decoder"
+  to: "end_of_utterance_events"
+}
+connect {
+  from: "decoder"
+  to: "incremental_norm"
+}
+connect {
+  from: "incremental_norm"
+  to: "recognition_events_filter"
+}
+connect {
+  from: "recognition_events_filter"
+  to: "recognition_events"
+}
+resource {
+  name: "en_us.fft_params"
+  classname: "Params"
+  params {
+    [greco.FftParams.id] {
+      input_length_ms: 25
+      fft_overdrive: true
+    }
+  }
+}
+resource {
+  name: "en_us.vad.acoustic_model"
+  classname: "NeuralNetworkResource"
+  params {
+    [greco.NeuralNetworkResourceParams.id] {
+      filename: "ep"
+      binary: true
+    }
+  }
+}
+resource {
+  name: "en_us.vad.acoustic_mean_stddev"
+  classname: "MeanStdDev"
+  params {
+    [greco.ProtoParams.id] {
+      1 {
+        12: 0x656d5f70
+        12: 0x7665646474735f6e
+      }
+      binary: true
+    }
+  }
+}
+resource {
+  name: "symbol_table"
+  classname: "CompactSymbolTable"
+  params {
+    [greco.SymbolTableParams.id] {
+      filename: "syms"
+    }
+  }
+}
+resource {
+  name: "sigma_fst"
+  classname: "SigmaFst"
+  params {
+    212796148 {
+      1: "symbol_table"
+    }
+  }
+}
+resource {
+  name: "word_glue_normalizer"
+  classname: "WordGlueNormalizer"
+  params {
+    24827402 {
+      3: "<space>"
+      3: "<sos>"
+      3: "<s>"
+      3: "</s>"
+      3: "<unk>"
+      3: "<noise>"
+      3: "<text_only>"
+    }
+  }
+}
+resource {
+  name: "en_us.embedded_fix_ampm"
+  classname: "FstNormalizer"
+  params {
+    [greco.FstNormalizerParams.id] {
+      filename "embedded_fix_ampm.mfar"
+    }
+  }
+}
+resource {
+  name: "en_us.embedded_class_denorm"
+  classname: "ClassNormalizer"
+  params {
+    [greco.FstNormalizerParams.id] {
+      filename "embedded_class_denorm.mfar"
+    }
+  }
+}
+resource {
+  name: "en_us.embedded_normalizer"
+  classname: "FstNormalizer"
+  params {
+    [greco.FstNormalizerParams.id] {
+      filename "embedded_normalizer.mfar"
+    }
+  }
+}
+resource {
+  name: "en_us.embedded_replace_annotated_punct_words_dash"
+  classname: "FstNormalizer"
+  params {
+    [greco.FstNormalizerParams.id] {
+      filename "embedded_replace_annotated_punct_words_dash.mfar"
+    }
+  }
+}
+resource {
+  name: "en_us.offensive_word_normalizer"
+  classname: "FstNormalizer"
+  params {
+    [greco.FstNormalizerParams.id] {
+      filename "offensive_word_normalizer.mfar"
+    }
+  }
+}
+resource {
+  name: "encoder0_network"
+  classname: "NeuralNetworkResource"
+  params {
+    [greco.NeuralNetworkResourceParams.id] {
+      filename: "enc0"
+      binary: true
+    }
+  }
+}
+resource {
+  name: "encoder1_network"
+  classname: "NeuralNetworkResource"
+  params {
+    [greco.NeuralNetworkResourceParams.id] {
+      filename: "enc1"
+      binary: true
+    }
+  }
+}
+resource {
+  name: "decoder_network"
+  classname: "NeuralNetworkResource"
+  params {
+    [greco.NeuralNetworkResourceParams.id] {
+      filename: "dec"
+      binary: true
+    }
+  }
+}
+resource {
+  name: "joint_network"
+  classname: "NeuralNetworkResource"
+  params {
+    [greco.NeuralNetworkResourceParams.id] {
+      filename: "joint"
+      binary: true
+    }
+  }
+}
+resource {
+  name: "en_us.input_mean_stddev"
+  classname: "MeanStdDev"
+  params {
+    [greco.ProtoParams.id] {
+      filename: "input_mean_stddev"
+      binary: true
+    }
+  }
+}
+thread {
+  name: "endpointer_events"
+}
+thread {
+  name: "rnnt_encoder0"
+}
+thread {
+  name: "rnnt_encoder1"
+}
+thread {
+  name: "end_of_utterance_events"
+}
+thread {
+  name: "audio_level_events"
+}
+session_resource {
+  name: "decoder_runner"
+  classname: "NeuralNetworkRunner"
+  params {
+    214791861 {
+      1: "decoder_network"
+    }
+  }
+}
+session_resource {
+  name: "joint_runner"
+  classname: "NeuralNetworkRunner"
+  params {
+    214791861 {
+      1: "joint_network"
+    }
+  }
+}
+session_resource {
+  name: "en_us.decoder.search_parameters"
+  classname: "FstSearchParams"
+  params {
+    [speech_decoder.FstSearchParams.id] {
+      max_arcs: 10
+      local_beam: 2.5
+      lattice_beam: 20
+      response: 6             # 4 = WORD_TOKEN_LATTICE
+      histogram_scale: 2.5
+      expand_decoder_graph: 0
+      106940458 {
+        1: 1
+        2: 1
+      }
+      171805764 {
+        1: 0x40a00000
+        3: 2
+      }
+    }
+  }
+}
+session_resource {
+  name: "encoder_score_cache"
+  classname: "PassThroughScoreCache"
+  params {
+    80660861: ""
+  }
+}
+name: "terse_recognizer:en_us:OFFLINE_DICTATION"
