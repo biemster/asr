@@ -4,13 +4,34 @@ import numpy as np
 import scipy.io.wavfile
 import matplotlib.pyplot as plt
 
+tf.enable_eager_execution()
+
+# read the wav file
 samplerate,rawdata = scipy.io.wavfile.read('sample.wav')
-input_buffer_full = rawdata[:,1]	# probably two channels, 0=left,1=right
+input_buffer_full = rawdata[:,0]
+signals = tf.reshape(input_buffer_full.astype(np.float32), [1,-1])	# probably two channels, 0=left,1=right
 samples_per_10ms = samplerate /100
 samples_per_25ms = samplerate /40
-fband = [125,7500]
+fband = [125.,7500.]
 channels = 80
-binwidth = (fband[1] - fband[0]) /channels
+channels_ep = 40
+stfts = tf.signal.stft(signals, frame_length=samples_per_25ms, frame_step=samples_per_10ms)
+spectrograms = tf.abs(stfts)
+
+# Warp the linear scale spectrograms into the mel-scale.
+num_spectrogram_bins = stfts.shape[-1].value
+linear_to_mel_weight_matrix_40 = tf.signal.linear_to_mel_weight_matrix(channels_ep, num_spectrogram_bins, samplerate, fband[0], fband[1])
+mel_spectrograms_40 = tf.tensordot(spectrograms, linear_to_mel_weight_matrix_40, 1)
+mel_spectrograms_40.set_shape(spectrograms.shape[:-1].concatenate(linear_to_mel_weight_matrix_40.shape[-1:]))
+linear_to_mel_weight_matrix_80 = tf.signal.linear_to_mel_weight_matrix(channels, num_spectrogram_bins, samplerate, fband[0], fband[1])
+mel_spectrograms_80 = tf.tensordot(spectrograms, linear_to_mel_weight_matrix_80, 1)
+mel_spectrograms_80.set_shape(spectrograms.shape[:-1].concatenate(linear_to_mel_weight_matrix_80.shape[-1:]))
+
+# Compute a stabilized log to get log-magnitude mel-scale spectrograms.
+log_mel_spectrograms_40 = tf.log(mel_spectrograms_40 + 1e-6)
+log_mel_spectrograms_80 = tf.log(mel_spectrograms_80 + 1e-6)
+print(log_mel_spectrograms_40)
+
 
 models = ['joint','dec','enc0','enc1','ep']
 interpreters = {}
@@ -48,27 +69,10 @@ output_data_dec = np.array(np.random.random_sample(output_shape_dec), dtype=np.f
 # run over frames
 list_a = []
 list_b = []
-for sample_iter in range(0, len(input_buffer_full) -samples_per_25ms, samples_per_10ms):
-	frame = input_buffer_full[sample_iter:sample_iter +samples_per_25ms]
-	frame = np.multiply(frame, np.hanning(samples_per_25ms))
-	F = np.fft.rfft(frame)
-	freq = np.fft.rfftfreq(len(frame), 1/float(samplerate))
-	fft_energies_at = range(fband[0] +(binwidth/2), fband[1], binwidth)
-	fft_energies = np.array([np.interp(fft_energies_at, freq, np.abs(F))], dtype=np.float32)
-
-	fft_energies[fft_energies < 1] = 1
-	fft_energies = np.log(fft_energies)
-
-	# print('frame:',frame)
-	# print(freq)
-	# print(np.abs(F))
-	# print(fft_energies_at)
-	# print('fft:',fft_energies)
-	# print('rand_enc0',input_data_enc0)
-
-
+list_c = []
+for filterbank_energies_ep in log_mel_spectrograms_40[0]:
 	# run the endpointer to decide if we should run the RNN
-	input_data_ep = np.array([np.sum(fft_energies.reshape(-1,2),axis=1)]) # take pair wise averages
+	input_data_ep = [filterbank_energies_ep]
 	interpreters['ep'].set_tensor(input_details['ep'][0]['index'], input_data_ep)
 	interpreters['ep'].invoke()
 	output_data_ep = interpreters['ep'].get_tensor(output_details['ep'][0]['index'])
@@ -80,6 +84,7 @@ for sample_iter in range(0, len(input_buffer_full) -samples_per_25ms, samples_pe
 	[[a,b]] = output_data_ep
 	list_a.append(a)
 	list_b.append(b)
+	list_c.append(a-(b*10))
 	if a > 0 and b > 0:
 		# input_data_enc0 = np.array(np.random.random_sample(input_details['enc0'][0]['shape']), dtype=np.float32)
 		input_data_enc0_stacked = np.concatenate((fft_energies_prevprev,fft_energies_prev,fft_energies),axis=1)
@@ -118,9 +123,11 @@ for sample_iter in range(0, len(input_buffer_full) -samples_per_25ms, samples_pe
 
 print(np.histogram(list_a))
 print(np.histogram(list_b))
+print(np.histogram(list_c))
 
-f, (wav,plota,plotb) = plt.subplots(3, sharex=True)
+f, (wav,plota,plotb,plotc) = plt.subplots(4, sharex=True)
 wav.plot(np.linspace(0, len(input_buffer_full)/float(samplerate), len(input_buffer_full), endpoint=False), input_buffer_full)
 plota.plot(np.linspace(0, len(input_buffer_full)/float(samplerate), ((len(input_buffer_full)/float(samplerate))*100) -2), list_a)
 plotb.plot(np.linspace(0, len(input_buffer_full)/float(samplerate), ((len(input_buffer_full)/float(samplerate))*100) -2), list_b)
+plotc.plot(np.linspace(0, len(input_buffer_full)/float(samplerate), ((len(input_buffer_full)/float(samplerate))*100) -2), list_c)
 plt.show()
