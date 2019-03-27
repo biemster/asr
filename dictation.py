@@ -56,8 +56,10 @@ for m in models:
     print('outputs',output_details[m])
 
 
+syms = dict(zip(range(66,91), [chr(c) for c in range(ord('a'),ord('z')+1)]))
+
 # init the stackers
-fft_energies_prev = np.array(np.random.random_sample([1, 80]), dtype=np.float32)
+fft_energies_prev = [log_mel_spectrograms_80[0][0]]
 fft_energies_prevprev = fft_energies_prev
 output_shape_enc0 = output_details['enc0'][0]['shape']
 output_data_enc0_prev = np.array(np.random.random_sample(output_shape_enc0), dtype=np.float32)
@@ -67,27 +69,21 @@ output_shape_dec = output_details['dec'][0]['shape']
 output_data_dec = np.array(np.random.random_sample(output_shape_dec), dtype=np.float32)
 
 # run over frames
-list_a = []
-list_b = []
-list_c = []
-for filterbank_energies_ep in log_mel_spectrograms_40[0]:
+log_mel_spectrograms_40_80 = zip(log_mel_spectrograms_40[0],log_mel_spectrograms_80[0])
+for filterbank_energies_ep,filterbank_energies in log_mel_spectrograms_40_80:
 	# run the endpointer to decide if we should run the RNN
 	input_data_ep = [filterbank_energies_ep]
 	interpreters['ep'].set_tensor(input_details['ep'][0]['index'], input_data_ep)
 	interpreters['ep'].invoke()
 	output_data_ep = interpreters['ep'].get_tensor(output_details['ep'][0]['index'])
-	print(input_data_ep)
-	print(output_data_ep)
 
 
 	# feed the RNN
 	[[a,b]] = output_data_ep
-	list_a.append(a)
-	list_b.append(b)
-	list_c.append(a-(b*10))
-	if a > 0 and b > 0:
-		# input_data_enc0 = np.array(np.random.random_sample(input_details['enc0'][0]['shape']), dtype=np.float32)
-		input_data_enc0_stacked = np.concatenate((fft_energies_prevprev,fft_energies_prev,fft_energies),axis=1)
+	# if a > 0 and b > 0:
+	if True:
+		# input_data_enc0_stacked = np.concatenate((fft_energies_prevprev,fft_energies_prev,[filterbank_energies]),axis=1)
+		input_data_enc0_stacked = np.concatenate(([filterbank_energies],fft_energies_prev,fft_energies_prevprev),axis=1)
 		interpreters['enc0'].set_tensor(input_details['enc0'][0]['index'], input_data_enc0_stacked)
 		interpreters['enc0'].invoke()
 		output_data_enc0 = interpreters['enc0'].get_tensor(output_details['enc0'][0]['index'])
@@ -109,7 +105,7 @@ for filterbank_energies_ep in log_mel_spectrograms_40[0]:
 
 		# roll the stackers for next iteration
 		fft_energies_prevprev = fft_energies_prev
-		fft_energies_prev = fft_energies
+		fft_energies_prev = [filterbank_energies]
 		output_data_enc0_prev = output_data_enc0
 
 		# prevent NaNs in the dec output, the loop will not recover from that
@@ -117,17 +113,7 @@ for filterbank_energies_ep in log_mel_spectrograms_40[0]:
 
 
 		# feed the output from the decoder to the symbol FST
-		# print(input_data_enc0_stacked)
-		print(output_data_dec)
-
-
-print(np.histogram(list_a))
-print(np.histogram(list_b))
-print(np.histogram(list_c))
-
-f, (wav,plota,plotb,plotc) = plt.subplots(4, sharex=True)
-wav.plot(np.linspace(0, len(input_buffer_full)/float(samplerate), len(input_buffer_full), endpoint=False), input_buffer_full)
-plota.plot(np.linspace(0, len(input_buffer_full)/float(samplerate), ((len(input_buffer_full)/float(samplerate))*100) -2), list_a)
-plotb.plot(np.linspace(0, len(input_buffer_full)/float(samplerate), ((len(input_buffer_full)/float(samplerate))*100) -2), list_b)
-plotc.plot(np.linspace(0, len(input_buffer_full)/float(samplerate), ((len(input_buffer_full)/float(samplerate))*100) -2), list_c)
-plt.show()
+		max_prob_char = tf.argmax(output_data_joint,axis=1)
+		# print(tf.argmax(output_data_joint,axis=1))
+		if max_prob_char >= 0x42 and max_prob_char <= 0x5b:
+			print(syms[max_prob_char[0].numpy()])
