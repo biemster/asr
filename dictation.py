@@ -38,7 +38,7 @@ trie = marisa_trie.Trie()
 trie.load('syms.marisa')
 
 # init models
-models = ['joint','dec','enc0','enc1','ep']
+models = ['ep','enc0','enc1','dec','joint']
 interpreters = {}
 input_details = {}
 tensor_details = {}
@@ -61,9 +61,10 @@ for m in models:
 
 
 
-# init the loop in the decoder (TODO: the paper indicates a start-of-sequence <sos> should be provided)
+# init the loop in the decoder, the paper indicates a start-of-sentence <sos> should be provided
 sym_prob_shape = output_details['joint'][0]['shape']
-sym_prob = np.array(np.random.random_sample(sym_prob_shape), dtype=np.float32)
+sym_prob = np.zeros(sym_prob_shape, dtype=np.float32)
+sym_prob[0][trie[u'<sorw>']] = 1
 
 # run over frames
 filterbank_energies_stack = []
